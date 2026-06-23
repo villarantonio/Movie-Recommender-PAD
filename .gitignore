@@ -1,0 +1,19 @@
+# Generated embeddings cache — can exceed 1 GB, regenerated via main.py
+embeddings_bge.npy
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
