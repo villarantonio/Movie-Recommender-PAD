@@ -24,8 +24,15 @@ def get_embeddings(
     Returns array of shape (n_movies, embedding_dim).
     """
     if os.path.exists(cache_path):
-        print(f"[embeddings] Loading cache: {cache_path}")
-        return np.load(cache_path)
+        cached = np.load(cache_path)
+        if cached.shape[0] == len(df):
+            print(f"[embeddings] Loading cache: {cache_path} — shape {cached.shape}")
+            return cached
+        print(
+            f"[embeddings] Cache shape mismatch: {cached.shape[0]} rows in cache "
+            f"vs {len(df)} movies in df. Deleting stale cache and regenerating..."
+        )
+        os.remove(cache_path)
 
     print(f"[embeddings] Generating embeddings with {model_name} ...")
     print(f"[embeddings] {len(df)} movies to encode — this may take several minutes on CPU.")
