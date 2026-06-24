@@ -4,6 +4,7 @@ Replicates the feature engineering from the FMF reference notebook
 (Content_Based_Movie_Recommendation_System.ipynb).
 """
 
+import gc
 import os
 import pandas as pd
 
@@ -53,16 +54,25 @@ def load_imdb_people(imdb_dir: str, known_tconst: set) -> pd.DataFrame:
 
     principals = pd.concat(chunks, ignore_index=True)
 
-    # Only load name records we actually need
+    # Only load name records we actually need — read in chunks to avoid ~2 GB peak
     needed_nconst = set(principals["nconst"].dropna())
-    names = pd.read_csv(
+    name_chunks = []
+    for chunk in pd.read_csv(
         names_path,
         sep="\t",
         usecols=["nconst", "primaryName"],
+        chunksize=500_000,
         dtype=str,
         na_values="\\N",
+    ):
+        chunk = chunk[chunk["nconst"].isin(needed_nconst)]
+        if not chunk.empty:
+            name_chunks.append(chunk)
+    names = (
+        pd.concat(name_chunks, ignore_index=True)
+        if name_chunks
+        else pd.DataFrame(columns=["nconst", "primaryName"])
     )
-    names = names[names["nconst"].isin(needed_nconst)]
 
     merged = principals.merge(names, on="nconst")
     merged["name_tok"] = merged["primaryName"].str.replace(" ", "_", regex=False)
@@ -113,6 +123,8 @@ def build_soup(data_dir: str, imdb_dir: str = None) -> pd.DataFrame:
     )
 
     movies = movies.merge(tag_strings, on="movieId", how="left")
+    del genome_scores, genome_tags, merged, high_relevance, tag_strings
+    gc.collect()
 
     # Combine: genome tags first, then genres (matches FMF ordering)
     def make_soup(row):
