@@ -16,13 +16,15 @@ def _find_file(directory, basename):
     raise FileNotFoundError(f"{basename}(.tsv.gz|.tsv) nao encontrado em {directory}")
 
 
-def load_imdb_people(imdb_dir: str) -> pd.DataFrame:
+def load_imdb_people(imdb_dir: str, known_tconst: set) -> pd.DataFrame:
     principals_path = _find_file(imdb_dir, "title.principals")
     names_path = _find_file(imdb_dir, "name.basics")
 
     keep_categories = {"director", "writer", "actor", "actress"}
 
-    # title.principals has ~60M rows — read in chunks and filter early to save memory
+    # title.principals has ~60M rows covering ~10M IMDb titles.
+    # Filter by known_tconst first (our 62k-movie catalog = 0.6% of IMDb)
+    # to keep peak memory under ~50 MB instead of ~4 GB.
     chunks = []
     for chunk in pd.read_csv(
         principals_path,
@@ -32,6 +34,9 @@ def load_imdb_people(imdb_dir: str) -> pd.DataFrame:
         dtype=str,
         na_values="\\N",
     ):
+        chunk = chunk[chunk["tconst"].isin(known_tconst)]  # key filter: drop 99.4% of rows
+        if chunk.empty:
+            continue
         chunk = chunk[chunk["category"].isin(keep_categories)]
         mask_cast = chunk["category"].isin({"actor", "actress"})
         # Keep all directors/writers; limit cast to top-3 billed (ordering <= 3)
@@ -39,10 +44,17 @@ def load_imdb_people(imdb_dir: str) -> pd.DataFrame:
             chunk[~mask_cast],
             chunk[mask_cast][chunk[mask_cast]["ordering"].astype(int) <= 3],
         ])
-        chunks.append(chunk)
+        if not chunk.empty:
+            chunks.append(chunk)
+
+    if not chunks:
+        print("[preprocess] Nenhum dado IMDb encontrado para o catalogo.")
+        return pd.DataFrame(columns=["tconst", "people_str"])
 
     principals = pd.concat(chunks, ignore_index=True)
 
+    # Only load name records we actually need
+    needed_nconst = set(principals["nconst"].dropna())
     names = pd.read_csv(
         names_path,
         sep="\t",
@@ -50,6 +62,7 @@ def load_imdb_people(imdb_dir: str) -> pd.DataFrame:
         dtype=str,
         na_values="\\N",
     )
+    names = names[names["nconst"].isin(needed_nconst)]
 
     merged = principals.merge(names, on="nconst")
     merged["name_tok"] = merged["primaryName"].str.replace(" ", "_", regex=False)
@@ -123,11 +136,12 @@ def build_soup(data_dir: str, imdb_dir: str = None) -> pd.DataFrame:
     result = movies.merge(links, on="movieId", how="left")
 
     if imdb_dir is not None:
-        people = load_imdb_people(imdb_dir)
-        # Convert imdbId (integer, no leading zeros) → tconst format: "tt" + 7-digit zero-padded
+        # Convert imdbId → tconst format: "tt" + 7-digit zero-padded
         result["tconst"] = result["imdbId"].dropna().astype(int).apply(
             lambda x: f"tt{x:07d}"
         )
+        known_tconst = set(result["tconst"].dropna())
+        people = load_imdb_people(imdb_dir, known_tconst)
         result = result.merge(people, on="tconst", how="left")
         n_enriched = result["people_str"].notna().sum()
         print(f"[preprocess] {n_enriched:,} movies enriched with IMDb cast/crew metadata.")
