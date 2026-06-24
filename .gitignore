@@ -1,5 +1,9 @@
 # Generated embeddings cache — can exceed 1 GB, regenerated via main.py
-embeddings_bge.npy
+*.npy
+
+# IMDb dataset files — large raw data, not tracked in git
+*.tsv
+*.tsv.gz
 
 # Python
 __pycache__/
